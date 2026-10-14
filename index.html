@@ -48,10 +48,12 @@ input[type=file]{width:100%;font-size:1rem;padding:10px 0}
 </section>
 
 <section class="card">
-<h2>3. 応募サイトに入力</h2>
-<p class="muted">ボタンで応募サイトを開き、コードを貼り付けてください。iPhone iPhoneのChromeでは、別のページから応募サイトの入力欄を直接操作することはできません。そのため、コードの自動認識とコピーまでを自動化し、応募フォームへの貼り付けは手動にしています。</p>
+<h2>3. 応募サイトに一括入力（試験機能）</h2>
+<p class="muted">入力欄が10個並ぶ応募フォーム向け。iPhone Chromeでは別サイトを直接操作できないため、応募サイト上でブックマークレットを実行します。まず「有効なコードをまとめてコピー」してください。</p>
+<button type="button" id="copyBookmarklet" class="alt" style="width:100%">自動入力用ブックマークレットをコピー</button>
+<p class="muted">初回のみ：Chromeで適当なページをブックマーク → Chromeのブックマーク管理画面でそのブックマークを編集 → 名前を「櫻坂一括入力」、URLを上のボタンでコピーした内容に変更します。</p>
 <a class="btn" style="width:100%" href="https://ticket.fortunemeets.app/sakurazaka46/16th/#/registration" target="_blank" rel="noopener">応募サイトを開く</a>
-<div class="note" style="margin-top:12px">入力のコツ：1件ずつ入力欄を長押しして「ペースト」します。10件すべてを一括貼り付けできるかはサイト側のフォーム仕様によります。応募の確定操作は自分で内容を確認して行ってください。</div>
+<div class="note" style="margin-top:12px">使い方：①有効なコードをまとめてコピー ②応募サイトを開く ③Chromeのアドレスバーに「櫻坂一括入力」と入力し、候補に表示される同名のブックマークを選択 ④表示された入力ダイアログにコードを貼り付けてOK ⑤10欄の内容をすべて原本と照合。<strong>応募ボタンは押しません。</strong><br><br>iPhone Chromeのバージョンや応募サイトの構造によっては動作しません。入力欄を10個検出できない場合は安全のため停止します。シリアルをGitHubに登録したり、他のサイトへ送信したりしないでください。</div>
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
@@ -108,8 +110,14 @@ function render(){
   head.append(label,del);
   const inp=document.createElement('input');inp.value=v;inp.maxLength=13;inp.autocapitalize='characters';inp.autocomplete='off';inp.spellcheck=false;inp.placeholder='13文字のコード';
   inp.addEventListener('input',()=>{codes[i]=inp.value.toUpperCase().replace(/[^A-Z0-9]/g,'');inp.value=codes[i];updateStatus(box,codes[i],i)});
+  const swapActions=document.createElement('div');swapActions.className='actions';swapActions.style.marginTop='8px';
+  const swap2z=document.createElement('button');swap2z.type='button';swap2z.className='alt';swap2z.textContent='2 ⇄ Z';swap2z.title='このコード内の2とZをすべて入れ替え';
+  swap2z.onclick=()=>{codes[i]=codes[i].replace(/[2Z]/g,c=>c==='2'?'Z':'2');inp.value=codes[i];updateStatus(box,codes[i],i)};
+  const swap6q=document.createElement('button');swap6q.type='button';swap6q.className='alt';swap6q.textContent='6 ⇄ Q';swap6q.title='このコード内の6とQをすべて入れ替え';
+  swap6q.onclick=()=>{codes[i]=codes[i].replace(/[6Q]/g,c=>c==='6'?'Q':'6');inp.value=codes[i];updateStatus(box,codes[i],i)};
+  swapActions.append(swap2z,swap6q);
   const st=document.createElement('div');st.className='state';
-  box.append(head,inp,st);host.append(box);updateStatus(box,v,i);
+  box.append(head,inp,swapActions,st);host.append(box);updateStatus(box,v,i);
  });
  updateSummary();
 }
@@ -175,6 +183,11 @@ $('copyAll').onclick=async()=>{
  const u=usable();if(!u.length){alert('コピーできる有効なコードがありません。');return}
  try{await navigator.clipboard.writeText(u.join('\n'));alert(`${u.length}件を改行区切りでコピーしました。`)}
  catch(e){const t=document.createElement('textarea');t.value=u.join('\n');document.body.append(t);t.select();document.execCommand('copy');t.remove();alert(`${u.length}件をコピーしました。`)}
+};
+const BOOKMARKLET="javascript:(function(){try{if(location.hostname!=='ticket.fortunemeets.app'){alert('応募サイトで実行してください。');return;}var pasted=prompt('OCRツールでコピーしたコードをここに貼り付けてください（改行区切り・最大10件）。');if(pasted===null)return;var vals=pasted.toUpperCase().split(/[\\s,、]+/).map(function(x){return x.trim()}).filter(Boolean);if(!vals.length){alert('コードがありません');return;}if(vals.length>10||vals.some(function(v){return !/^[A-Z0-9]{11}7H$/.test(v)})||new Set(vals).size!==vals.length){alert('コード数・13文字・末尾7H・重複のいずれかを確認してください。');return;}var fields=Array.from(document.querySelectorAll('input')).filter(function(el){var r=el.getBoundingClientRect();return (el.type==='text'||el.type==='search'||!el.type)&&!el.disabled&&r.width>40&&r.height>15});if(fields.length!==10){alert('入力欄が'+fields.length+'個検出されました。10個ではないため安全のため中止します。');return;}if(!confirm(vals.length+'件を1～'+vals.length+'番の欄に入力します。続けますか？'))return;var setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;vals.forEach(function(v,i){setter.call(fields[i],v);fields[i].dispatchEvent(new Event('input',{bubbles:true}));fields[i].dispatchEvent(new Event('change',{bubbles:true}));});alert(vals.length+'件を入力しました。表示と原本を照合し、応募操作は手動で行ってください。');}catch(e){alert('入力処理エラー：'+String(e&&e.message||e));}})();";
+$('copyBookmarklet').onclick=async()=>{
+ try {await navigator.clipboard.writeText(BOOKMARKLET);alert('ブックマークレットをコピーしました。ChromeのブックマークのURL欄に貼り付けてください。')}
+ catch(e){const el=document.createElement('textarea');el.value=BOOKMARKLET;document.body.append(el);el.select();document.execCommand('copy');el.remove();alert('ブックマークレットをコピーしました。')}
 };
 codes=Array(10).fill('');render();
 </script>
