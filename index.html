@@ -26,7 +26,7 @@ input[type=file]{width:100%;font-size:1rem;padding:10px 0}
 </head>
 <body>
 <h1>シリアル読み取りアシスト（iPhone Chrome向け）</h1>
-<p class="muted">iPhoneのChrome向け。写真を撮る／選ぶ → OCR → 13文字チェック → コピーして応募サイトに貼り付けます。</p>
+<p class="muted">iPhoneのChrome向け。写真を撮る／選ぶ → OCR → 13文字かつ末尾が「7H」のコードだけを候補にします。コピーして応募サイトに貼り付けます。</p>
 
 <section class="card">
 <h2>1. 写真を撮る・選ぶ</h2>
@@ -41,7 +41,7 @@ input[type=file]{width:100%;font-size:1rem;padding:10px 0}
 
 <section class="card">
 <h2>2. コードを確認・修正</h2>
-<p class="muted">13文字の英数字としてチェックします。読み間違いは必ず券面と見比べて修正してください。応募コードは大文字・小文字を区別しない想定で大文字表示します。</p>
+<p class="muted">13文字の英数字で、末尾が「7H」のコードだけを有効とします。読み間違いは必ず券面と見比べて修正してください。応募コードは大文字表示します。</p>
 <div id="codes"></div>
 <div class="actions"><button class="alt" id="add">＋ コード欄を追加</button><button id="copyAll">有効なコードをまとめてコピー</button></div>
 <div id="summary" class="muted"></div>
@@ -67,23 +67,36 @@ function normalize(s){
 function extract(text){
  const raw=normalize(text);
  const out=[];
- // First identify tokens with common OCR separators removed.
+ const isCode=s=>/^[A-Z0-9]{11}7H$/.test(s);
+ // OCRの行ごとに区切り文字を除去し、13文字・末尾7Hの候補だけ抽出。
  for(const line of raw.split(/\n/)){
    const compact=line.replace(/[^A-Z0-9]/g,'');
-   if(compact.length===13 && /^[A-Z0-9]{13}$/.test(compact)) out.push(compact);
+   if(compact.length===13 && isCode(compact)) out.push(compact);
+   // 行に余分な文字が混ざった場合も、末尾条件に合う13文字だけ候補化。
+   if(compact.length>13){
+     for(let k=0;k<=compact.length-13;k++){
+       const part=compact.slice(k,k+13);
+       if(isCode(part)) out.push(part);
+     }
+   }
  }
+ // OCRがコードを複数トークンに分けた場合に備え、隣接トークンも連結して判定。
  const tokens=raw.replace(/[^A-Z0-9]/g,' ').split(/\s+/).filter(Boolean);
  for(let i=0;i<tokens.length;i++){
-   let s='';
-   for(let j=i;j<tokens.length && s.length<14;j++){
-     s+=tokens[j];
-     if(s.length===13 && /^[A-Z0-9]{13}$/.test(s)) out.push(s);
-     if(s.length>=13) break;
+   let joined='';
+   for(let j=i;j<tokens.length && joined.length<25;j++){
+     joined+=tokens[j];
+     if(joined.length>=13){
+       for(let k=0;k<=joined.length-13;k++){
+         const part=joined.slice(k,k+13);
+         if(isCode(part)) out.push(part);
+       }
+     }
    }
  }
  return [...new Set(out)];
 }
-function valid(s){return /^[A-Z0-9]{13}$/.test(s.trim())}
+function valid(s){return /^[A-Z0-9]{11}7H$/.test(s.trim())}
 function usable(){return codes.map(s=>s.trim().toUpperCase()).filter((s,i,a)=>valid(s)&&a.indexOf(s)===i)}
 function render(){
  const host=$('codes');host.innerHTML='';
@@ -103,14 +116,14 @@ function render(){
 function updateStatus(box,v,i){
  const st=box.querySelector('.state');
  const duplicate=v && codes.filter(x=>x.trim().toUpperCase()===v.trim().toUpperCase()).length>1;
- st.textContent=!v?'未入力':!valid(v)?`形式を確認：${v.length}文字（13文字必要）`:duplicate?'重複しています':'13文字・形式OK';
+ st.textContent=!v?'未入力':!valid(v)?`形式を確認：${v.length}文字（13文字必要・末尾は7H）`:duplicate?'重複しています':'13文字・末尾7H・形式OK';
  st.className='state '+(!v||!valid(v)||duplicate?'bad':'good');
  updateSummary();
 }
 function updateSummary(){
  const good=usable(),filled=codes.filter(v=>v.trim()).length;
  const dup=codes.filter((v,i,a)=>v.trim()&&a.indexOf(v.trim())!==i).length;
- $('summary').textContent=`欄：${codes.length}個／入力済み：${filled}個／有効な重複なしコード：${good.length}個`+(dup?`／重複：${dup}件`:'');
+ $('summary').textContent=`欄：${codes.length}個／入力済み：${filled}個／有効な重複なしコード（末尾7H）：${good.length}個`+(dup?`／重複：${dup}件`:'');
 }
 async function loadFiles(files){
  selectedFiles=[...files].filter(f=>f.type.startsWith('image/'));
@@ -147,7 +160,7 @@ $('scan').onclick=async()=>{
    codes=[...new Set(found)];
    if(!codes.length) codes=Array(10).fill('');
    render();
-   log(details.join('\n')+`\n\n認識候補 ${usable().length}件。写真と照合してからコピーしてください。`);
+   log(details.join('\n')+`\n\n末尾が7Hの認識候補 ${usable().length}件。写真と照合してからコピーしてください。`);
  }catch(e){
    let d='';try{d=e?.message||e?.toString?.()||JSON.stringify(e)||'エラー詳細を取得できません'}catch(_){d='エラー詳細を取得できません'}
    log('読み取りエラー：'+d+'\n\nOCRエンジン／学習データの取得に失敗した可能性があります。Wi-Fiまたはモバイル通信を確認し、ページを再読み込みしてください。改善しない場合は、このエラー全文を教えてください。応急策：iPhoneの写真アプリでコード部分を長押しし、テキスト認識でコピーしてコード欄に貼り付けられます。');
