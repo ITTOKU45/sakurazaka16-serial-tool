@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#18212b">
+<title>シリアル読み取りアシスト（iPhone Chrome向け）</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;color:#17202a;background:#f3f5f7}
+*{box-sizing:border-box}body{margin:0 auto;padding:16px 14px 36px;max-width:640px}
+h1{font-size:1.35rem;margin:4px 0 8px}.muted{color:#5b6570;font-size:.91rem;line-height:1.55}
+.card{background:#fff;border:1px solid #dce1e6;border-radius:16px;padding:16px;margin:14px 0}
+h2{font-size:1.05rem;margin:0 0 10px}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:11px;padding:13px 14px;font-size:1rem;font-weight:650;background:#175ea8;color:white;text-decoration:none;cursor:pointer;min-height:46px}
+button.alt,.btn.alt{background:#e8edf2;color:#18212b}
+button:disabled{opacity:.5}
+input[type=file]{width:100%;font-size:1rem;padding:10px 0}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actions>*{flex:1}
+#log{background:#f0f3f6;border-radius:10px;padding:11px;white-space:pre-wrap;font-size:.9rem;line-height:1.45;margin-top:10px}
+.code{border:1px solid #d8dee5;border-radius:11px;padding:10px;margin:10px 0}
+.codehead{display:flex;justify-content:space-between;align-items:center;font-weight:700;margin-bottom:7px}
+.code input{width:100%;font:600 1.08rem ui-monospace,SFMono-Regular,monospace;letter-spacing:.04em;border:1px solid #bfc8d2;border-radius:8px;padding:12px;text-transform:uppercase}
+.state{font-size:.83rem;margin-top:6px}.good{color:#137333}.bad{color:#b3261e}
+.note{background:#fff8e1;border-radius:10px;padding:11px;font-size:.9rem;line-height:1.5}
+</style>
+</head>
+<body>
+<h1>シリアル読み取りアシスト（iPhone Chrome向け）</h1>
+<p class="muted">iPhoneのChrome向け。写真を撮る／選ぶ → OCR → 13文字チェック → コピーして応募サイトに貼り付けます。</p>
+
+<section class="card">
+<h2>1. 写真を撮る・選ぶ</h2>
+<p class="muted">「写真を撮る」を選ぶとカメラが開きます。複数コードが写った写真にも対応します。読み取り処理は端末内で行いますが、初回はOCRライブラリをCDNから読み込むため通信が必要です。ChromeでこのHTMLを開いて利用してください。</p>
+<label class="btn" for="camera">📷 写真を撮る</label>
+<input id="camera" type="file" accept="image/*" capture="environment" style="display:none">
+<label class="btn alt" for="gallery" style="margin-top:8px">🖼 写真ライブラリから選ぶ</label>
+<input id="gallery" type="file" accept="image/*" multiple>
+<div class="actions"><button id="scan">OCRで読み取る</button><button class="alt" id="reset">クリア</button></div>
+<div id="log">写真を撮るか選んでください。</div>
+</section>
+
+<section class="card">
+<h2>2. コードを確認・修正</h2>
+<p class="muted">13文字の英数字としてチェックします。読み間違いは必ず券面と見比べて修正してください。応募コードは大文字・小文字を区別しない想定で大文字表示します。</p>
+<div id="codes"></div>
+<div class="actions"><button class="alt" id="add">＋ コード欄を追加</button><button id="copyAll">有効なコードをまとめてコピー</button></div>
+<div id="summary" class="muted"></div>
+</section>
+
+<section class="card">
+<h2>3. 応募サイトに入力</h2>
+<p class="muted">ボタンで応募サイトを開き、コードを貼り付けてください。iPhone iPhoneのChromeでは、別のページから応募サイトの入力欄を直接操作することはできません。そのため、コードの自動認識とコピーまでを自動化し、応募フォームへの貼り付けは手動にしています。</p>
+<a class="btn" style="width:100%" href="https://ticket.fortunemeets.app/sakurazaka46/16th/#/registration" target="_blank" rel="noopener">応募サイトを開く</a>
+<div class="note" style="margin-top:12px">入力のコツ：1件ずつ入力欄を長押しして「ペースト」します。10件すべてを一括貼り付けできるかはサイト側のフォーム仕様によります。応募の確定操作は自分で内容を確認して行ってください。</div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let codes=[];
+let selectedFiles=[];
+function log(s){$('log').textContent=s}
+function normalize(s){
+ return s.toUpperCase().replace(/[０-９Ａ-Ｚａ-ｚ]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+  .replace(/[ＯО]/g,'0').replace(/[Ｉⅼ|]/g,'1').replace(/[Ｓ]/g,'5');
+}
+function extract(text){
+ const raw=normalize(text);
+ const out=[];
+ // First identify tokens with common OCR separators removed.
+ for(const line of raw.split(/\n/)){
+   const compact=line.replace(/[^A-Z0-9]/g,'');
+   if(compact.length===13 && /^[A-Z0-9]{13}$/.test(compact)) out.push(compact);
+ }
+ const tokens=raw.replace(/[^A-Z0-9]/g,' ').split(/\s+/).filter(Boolean);
+ for(let i=0;i<tokens.length;i++){
+   let s='';
+   for(let j=i;j<tokens.length && s.length<14;j++){
+     s+=tokens[j];
+     if(s.length===13 && /^[A-Z0-9]{13}$/.test(s)) out.push(s);
+     if(s.length>=13) break;
+   }
+ }
+ return [...new Set(out)];
+}
+function valid(s){return /^[A-Z0-9]{13}$/.test(s.trim())}
+function usable(){return codes.map(s=>s.trim().toUpperCase()).filter((s,i,a)=>valid(s)&&a.indexOf(s)===i)}
+function render(){
+ const host=$('codes');host.innerHTML='';
+ codes.forEach((v,i)=>{
+  const box=document.createElement('div');box.className='code';
+  const head=document.createElement('div');head.className='codehead';
+  const label=document.createElement('span');label.textContent='コード '+(i+1);
+  const del=document.createElement('button');del.className='alt';del.style.minHeight='36px';del.style.padding='7px 10px';del.style.fontSize='.85rem';del.textContent='削除';del.onclick=()=>{codes.splice(i,1);render()};
+  head.append(label,del);
+  const inp=document.createElement('input');inp.value=v;inp.maxLength=13;inp.autocapitalize='characters';inp.autocomplete='off';inp.spellcheck=false;inp.placeholder='13文字のコード';
+  inp.addEventListener('input',()=>{codes[i]=inp.value.toUpperCase().replace(/[^A-Z0-9]/g,'');inp.value=codes[i];updateStatus(box,codes[i],i)});
+  const st=document.createElement('div');st.className='state';
+  box.append(head,inp,st);host.append(box);updateStatus(box,v,i);
+ });
+ updateSummary();
+}
+function updateStatus(box,v,i){
+ const st=box.querySelector('.state');
+ const duplicate=v && codes.filter(x=>x.trim().toUpperCase()===v.trim().toUpperCase()).length>1;
+ st.textContent=!v?'未入力':!valid(v)?`形式を確認：${v.length}文字（13文字必要）`:duplicate?'重複しています':'13文字・形式OK';
+ st.className='state '+(!v||!valid(v)||duplicate?'bad':'good');
+ updateSummary();
+}
+function updateSummary(){
+ const good=usable(),filled=codes.filter(v=>v.trim()).length;
+ const dup=codes.filter((v,i,a)=>v.trim()&&a.indexOf(v.trim())!==i).length;
+ $('summary').textContent=`欄：${codes.length}個／入力済み：${filled}個／有効な重複なしコード：${good.length}個`+(dup?`／重複：${dup}件`:'');
+}
+async function loadFiles(files){
+ selectedFiles=[...files].filter(f=>f.type.startsWith('image/'));
+ log(selectedFiles.length?`${selectedFiles.length}枚の写真を選択しました。「OCRで読み取る」を押してください。`:'画像を選択してください。');
+}
+$('camera').addEventListener('change',e=>loadFiles(e.target.files));
+$('gallery').addEventListener('change',e=>loadFiles(e.target.files));
+$('scan').onclick=async()=>{
+ if(!selectedFiles.length){log('先に写真を撮るか、写真ライブラリから選んでください。');return}
+ if(!window.Tesseract){log('OCRライブラリが読み込まれていません。HTMLを直接開いた場合、Chromeが外部スクリプトをブロックすることがあります。通信を確認してください。');return}
+ $('scan').disabled=true;
+ let worker;
+ try{
+   log('OCRエンジンを起動しています。初回は少し時間がかかります…');
+   worker=await Tesseract.createWorker('eng',1,{
+     workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+     corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
+     langPath:'https://tessdata.projectnaptha.com/4.0.0',
+     workerBlobURL:false
+   });
+   await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz',preserve_interword_spaces:'1'});
+   const found=[], details=[];
+   for(let i=0;i<selectedFiles.length;i++){
+     log(`読み取り中 ${i+1}/${selectedFiles.length}…`);
+     const result=await worker.recognize(selectedFiles[i]);
+     const list=extract(result.data.text);found.push(...list);
+     details.push(`写真${i+1}: ${list.length?list.join(', '):'コード候補なし'}`);
+   }
+   codes=[...new Set(found)];
+   if(!codes.length) codes=Array(10).fill('');
+   render();
+   log(details.join('\n')+`\n\n認識候補 ${usable().length}件。写真と照合してからコピーしてください。`);
+ }catch(e){
+   let d='';try{d=e?.message||String(e)}catch(_){d='詳細不明'}
+   log('読み取りエラー：'+d+'\n\nHTMLファイルを直接開く方法では、iPhone ChromeがOCRエンジンやWorkerを起動できない場合があります。HTTPSで公開したWebアプリとして開く方式が必要になる可能性があります。応急策として、写真アプリでコード部分を長押ししてテキスト認識でコピーし、下のコード欄に貼り付けてください。');
+ }finally{
+   if(worker){try{await worker.terminate()}catch(_){}}
+   $('scan').disabled=false;
+ }
+};
+$('reset').onclick=()=>{codes=Array(10).fill('');selectedFiles=[];$('camera').value='';$('gallery').value='';render();log('クリアしました。写真を撮るか選んでください。')};
+$('add').onclick=()=>{codes.push('');render()};
+$('copyAll').onclick=async()=>{
+ const u=usable();if(!u.length){alert('コピーできる有効なコードがありません。');return}
+ try{await navigator.clipboard.writeText(u.join('\n'));alert(`${u.length}件を改行区切りでコピーしました。`)}
+ catch(e){const t=document.createElement('textarea');t.value=u.join('\n');document.body.append(t);t.select();document.execCommand('copy');t.remove();alert(`${u.length}件をコピーしました。`)}
+};
+codes=Array(10).fill('');render();
+</script>
+</body>
+</html>
