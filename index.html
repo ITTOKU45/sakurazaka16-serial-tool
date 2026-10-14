@@ -126,10 +126,15 @@ $('scan').onclick=async()=>{
  try{
    log('OCRエンジンを起動しています。初回は少し時間がかかります…');
    worker=await Tesseract.createWorker('eng',1,{
-     workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-     corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
+     workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
+     corePath:'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
      langPath:'https://tessdata.projectnaptha.com/4.0.0',
-     workerBlobURL:false
+     logger: m => {
+       if (m && m.status) {
+         const pct = typeof m.progress === 'number' ? ` ${Math.round(m.progress*100)}%` : '';
+         log(`OCRエンジン：${m.status}${pct}`);
+       }
+     }
    });
    await worker.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz',preserve_interword_spaces:'1'});
    const found=[], details=[];
@@ -144,8 +149,8 @@ $('scan').onclick=async()=>{
    render();
    log(details.join('\n')+`\n\n認識候補 ${usable().length}件。写真と照合してからコピーしてください。`);
  }catch(e){
-   let d='';try{d=e?.message||String(e)}catch(_){d='詳細不明'}
-   log('読み取りエラー：'+d+'\n\nHTMLファイルを直接開く方法では、iPhone ChromeがOCRエンジンやWorkerを起動できない場合があります。HTTPSで公開したWebアプリとして開く方式が必要になる可能性があります。応急策として、写真アプリでコード部分を長押ししてテキスト認識でコピーし、下のコード欄に貼り付けてください。');
+   let d='';try{d=e?.message||e?.toString?.()||JSON.stringify(e)||'エラー詳細を取得できません'}catch(_){d='エラー詳細を取得できません'}
+   log('読み取りエラー：'+d+'\n\nOCRエンジン／学習データの取得に失敗した可能性があります。Wi-Fiまたはモバイル通信を確認し、ページを再読み込みしてください。改善しない場合は、このエラー全文を教えてください。応急策：iPhoneの写真アプリでコード部分を長押しし、テキスト認識でコピーしてコード欄に貼り付けられます。');
  }finally{
    if(worker){try{await worker.terminate()}catch(_){}}
    $('scan').disabled=false;
